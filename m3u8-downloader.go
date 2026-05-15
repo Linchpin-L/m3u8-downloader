@@ -1,7 +1,7 @@
-//@author:llychao<lychao_vip@163.com>
-//@contributor: Junyi<me@junyi.pw>
-//@date:2020-02-18
-//@功能:golang m3u8 video Downloader
+// @author:llychao<lychao_vip@163.com>
+// @contributor: Junyi<me@junyi.pw>
+// @date:2020-02-18
+// @功能:golang m3u8 video Downloader
 package main
 
 import (
@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -24,6 +25,8 @@ import (
 
 	"github.com/levigross/grequests"
 )
+
+const debug = false
 
 const (
 	// HEAD_TIMEOUT 请求头超时时间
@@ -38,7 +41,7 @@ var (
 	// 命令行参数
 	urlFlag = flag.String("u", "", "m3u8下载地址(http(s)://url/xx/xx/index.m3u8)")
 	nFlag   = flag.Int("n", 16, "下载线程数(max goroutines num)")
-	htFlag  = flag.String("ht", "apiv1", "设置getHost的方式(apiv1: `http(s):// + url.Host + filepath.Dir(url.Path)`; apiv2: `http(s)://+ u.Host`")
+	htFlag  = flag.String("ht", "", "设置getHost的方式(apiv1: `http(s):// + url.Host + filepath.Dir(url.Path)`; apiv2: `http(s)://+ u.Host`")
 	oFlag   = flag.String("o", "movie", "自定义文件名(默认为movie)")
 	cFlag   = flag.String("c", "", "自定义请求 cookie")
 	sFlag   = flag.Int("s", 0, "是否允许不安全的请求(默认为0)")
@@ -87,7 +90,7 @@ func Run() {
 	insecure := *sFlag
 	savePath := *spFlag
 
-	ro.Headers["Referer"] = getHost(m3u8Url, "apiv2")
+	ro.Headers["Referer"], _ = getHost(m3u8Url, "apiv2")
 	if insecure != 0 {
 		ro.InsecureSkipVerify = true
 	}
@@ -109,7 +112,11 @@ func Run() {
 	if isExist, _ := pathExists(download_dir); !isExist {
 		os.MkdirAll(download_dir, os.ModePerm)
 	}
-	m3u8Host := getHost(m3u8Url, hostType)
+	m3u8Host, err := getHost(m3u8Url, hostType)
+	if err != nil { 
+		log.Panic(err)
+		return
+	}
 	m3u8Body := getM3u8Body(m3u8Url)
 	//m3u8Body := getFromFile()
 	ts_key := getM3u8Key(m3u8Host, m3u8Body)
@@ -137,16 +144,49 @@ func Run() {
 }
 
 // 获取m3u8地址的host
-func getHost(Url, ht string) (host string) {
+func getHost(Url, ht string) (host string, err error) {
 	u, err := url.Parse(Url)
-	checkErr(err)
+	if err != nil {
+		return
+	}
 	switch ht {
 	case "apiv1":
 		host = u.Scheme + "://" + u.Host + filepath.Dir(u.EscapedPath())
 	case "apiv2":
 		host = u.Scheme + "://" + u.Host
+	default:
+		host, err = GetURLDir(Url)
+		if err != nil {
+			return
+		}
 	}
 	return
+}
+
+// GetURLDir 使用 net/url 包解析 URL 并返回目录部分
+func GetURLDir(rawURL string) (string, error) {
+    u, err := url.Parse(rawURL)
+    if err != nil {
+        return "", err
+    }
+
+    // 处理空路径或已经是根路径的情况
+    dirPath := u.Path
+    if dirPath == "" || dirPath == "/" {
+        dirPath = "/"
+    } else {
+        dirPath = path.Dir(dirPath)
+        if !strings.HasSuffix(dirPath, "/") {
+            dirPath += "/"
+        }
+    }
+
+    u.Path = dirPath
+    u.RawPath = ""
+    u.RawQuery = ""
+    u.Fragment = ""
+
+    return u.String(), nil
 }
 
 // 获取m3u8地址的内容体
@@ -195,7 +235,11 @@ func getTsList(host, body string) (tsList []TsInfo) {
 			} else {
 				ts = TsInfo{
 					Name: fmt.Sprintf(TS_NAME_TEMPLATE, index),
-					Url:  fmt.Sprintf("%s/%s", host, line),
+				}
+				if strings.HasSuffix(host, "/") {
+					ts.Url = host + line
+				} else {
+					ts.Url = host + "/" + line
 				}
 				tsList = append(tsList, ts)
 			}
@@ -267,6 +311,7 @@ func downloadTsFile(ts TsInfo, download_dir, key string, retries int) {
 		}
 	}
 	ioutil.WriteFile(curr_path, origData, 0666)
+	return
 }
 
 // downloader m3u8 下载器
@@ -287,7 +332,6 @@ func downloader(tsList []TsInfo, maxGoroutines int, downloadDir string, key stri
 			downloadTsFile(ts, downloadDir, key, retryies)
 			downloadCount++
 			DrawProgressBar("Downloading", float32(downloadCount)/float32(tsLen), PROGRESS_WIDTH, ts.Name)
-			return
 		}(ts, downloadDir, key, retry)
 	}
 	wg.Wait()
