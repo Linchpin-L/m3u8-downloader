@@ -46,6 +46,7 @@ var (
 	cFlag   = flag.String("c", "", "自定义请求 cookie")
 	sFlag   = flag.Int("s", 0, "是否允许不安全的请求(默认为0)")
 	spFlag  = flag.String("sp", "", "文件保存路径(默认为当前路径)")
+	fFlag   = flag.String("f", "", "包含多个m3u8地址的文件路径(每行一个地址)")
 
 	logger *log.Logger
 	ro     = &grequests.RequestOptions{
@@ -75,20 +76,60 @@ func main() {
 }
 
 func Run() {
-	msgTpl := "[功能]:多线程下载直播流 m3u8 视屏（ts + 合并）\n[提醒]:如果下载失败，请使用 -ht=apiv2 \n[提醒]:如果下载失败，m3u8 地址可能存在嵌套\n[提醒]:如果进度条中途下载失败，可重复执行"
+	msgTpl := "[功能]:多线程下载直播流 m3u8 视频（ts + 合并）\n[提醒]:如果下载失败，请使用 -ht=apiv2 \n[提醒]:如果下载失败，m3u8 地址可能存在嵌套\n[提醒]:如果进度条中途下载失败，可重复执行"
 	fmt.Println(msgTpl)
 	runtime.GOMAXPROCS(runtime.NumCPU())
-	now := time.Now()
 
 	// 解析命令行参数
 	flag.Parse()
 	m3u8Url := *urlFlag
+	filePath := *fFlag
 	maxGoroutines := *nFlag
 	hostType := *htFlag
 	movieDir := *oFlag
 	cookie := *cFlag
 	insecure := *sFlag
 	savePath := *spFlag
+
+	var urls []string
+	if filePath != "" {
+		// 从文件读取 URLs
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			logger.Fatalf("[Error] 无法读取文件 %s: %v\n", filePath, err)
+			return
+		}
+
+		lines := strings.Split(string(content), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "#") {
+				urls = append(urls, line)
+			}
+		}
+	}
+	if m3u8Url != "" {
+		// 单个 URL
+		urls = append(urls, m3u8Url)
+	}
+
+	if len(urls) == 0 {
+		flag.Usage()
+		return
+	}
+
+	// 循环下载每个 URL
+	for i, url := range urls {
+		if len(urls) > 1 {
+			fmt.Printf("\n========== 开始下载第 %d/%d 个视频 ==========\n", i+1, len(urls))
+		}
+		downloadSingleVideo(url, maxGoroutines, hostType, movieDir, cookie, insecure, savePath, i)
+	}
+}
+
+// downloadSingleVideo 下载单个视频
+func downloadSingleVideo(m3u8Url string, maxGoroutines int, hostType string, movieDir string, cookie string, insecure int, savePath string, index int) {
+	now := time.Now()
 
 	ro.Headers["Referer"], _ = getHost(m3u8Url, "apiv2")
 	if insecure != 0 {
@@ -99,7 +140,7 @@ func Run() {
 		ro.Headers["Cookie"] = cookie
 	}
 	if !strings.HasPrefix(m3u8Url, "http") || m3u8Url == "" {
-		flag.Usage()
+		logger.Printf("[Error] 无效的 URL: %s\n", m3u8Url)
 		return
 	}
 	var download_dir string
@@ -107,13 +148,20 @@ func Run() {
 	if savePath != "" {
 		pwd = savePath
 	}
+
+	// 如果有多个视频，使用索引区分目录名
+	dirName := movieDir
+	if index > 0 {
+		dirName = fmt.Sprintf("%s_%d", movieDir, index+1)
+	}
+
 	//pwd = "/Users/chao/Desktop" //自定义地址
-	download_dir = filepath.Join(pwd, movieDir)
+	download_dir = filepath.Join(pwd, dirName)
 	if isExist, _ := pathExists(download_dir); !isExist {
 		os.MkdirAll(download_dir, os.ModePerm)
 	}
 	m3u8Host, err := getHost(m3u8Url, hostType)
-	if err != nil { 
+	if err != nil {
 		log.Panic(err)
 		return
 	}
@@ -137,10 +185,11 @@ func Run() {
 	default:
 		unix_merge_file(download_dir)
 	}
-	os.Rename(filepath.Join(download_dir, "merge.mp4"), download_dir+".mp4")
+	outputFile := filepath.Join(pwd, dirName+".mp4")
+	os.Rename(filepath.Join(download_dir, "merge.mp4"), outputFile)
 	os.RemoveAll(download_dir)
 	DrawProgressBar("Merging", float32(1), PROGRESS_WIDTH, "merge.ts")
-	fmt.Printf("\n[Success] 下载保存路径：%s | 共耗时: %6.2fs\n", download_dir+".mp4", time.Now().Sub(now).Seconds())
+	fmt.Printf("\n[Success] 下载保存路径：%s | 共耗时: %6.2fs\n", outputFile, time.Since(now).Seconds())
 }
 
 // 获取m3u8地址的host
@@ -165,28 +214,28 @@ func getHost(Url, ht string) (host string, err error) {
 
 // GetURLDir 使用 net/url 包解析 URL 并返回目录部分
 func GetURLDir(rawURL string) (string, error) {
-    u, err := url.Parse(rawURL)
-    if err != nil {
-        return "", err
-    }
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
 
-    // 处理空路径或已经是根路径的情况
-    dirPath := u.Path
-    if dirPath == "" || dirPath == "/" {
-        dirPath = "/"
-    } else {
-        dirPath = path.Dir(dirPath)
-        if !strings.HasSuffix(dirPath, "/") {
-            dirPath += "/"
-        }
-    }
+	// 处理空路径或已经是根路径的情况
+	dirPath := u.Path
+	if dirPath == "" || dirPath == "/" {
+		dirPath = "/"
+	} else {
+		dirPath = path.Dir(dirPath)
+		if !strings.HasSuffix(dirPath, "/") {
+			dirPath += "/"
+		}
+	}
 
-    u.Path = dirPath
-    u.RawPath = ""
-    u.RawQuery = ""
-    u.Fragment = ""
+	u.Path = dirPath
+	u.RawPath = ""
+	u.RawQuery = ""
+	u.Fragment = ""
 
-    return u.String(), nil
+	return u.String(), nil
 }
 
 // 获取m3u8地址的内容体
@@ -310,8 +359,7 @@ func downloadTsFile(ts TsInfo, download_dir, key string, retries int) {
 			break
 		}
 	}
-	ioutil.WriteFile(curr_path, origData, 0666)
-	return
+	os.WriteFile(curr_path, origData, 0666)
 }
 
 // downloader m3u8 下载器
@@ -391,6 +439,9 @@ func execWinShell(s string) error {
 
 // windows 合并文件
 func win_merge_file(path string) {
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	
 	os.Chdir(path)
 	execWinShell("copy /b *.ts merge.tmp")
 	execWinShell("del /Q *.ts")
@@ -399,6 +450,9 @@ func win_merge_file(path string) {
 
 // unix 合并文件
 func unix_merge_file(path string) {
+	originalDir, _ := os.Getwd()
+	defer os.Chdir(originalDir)
+	
 	os.Chdir(path)
 	//cmd := `ls  *.ts |sort -t "\." -k 1 -n |awk '{print $0}' |xargs -n 1 -I {} bash -c "cat {} >> new.tmp"`
 	cmd := `cat *.ts >> merge.tmp`
