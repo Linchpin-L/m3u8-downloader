@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"encoding/csv"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -46,7 +47,7 @@ var (
 	cFlag   = flag.String("c", "", "自定义请求 cookie")
 	sFlag   = flag.Int("s", 0, "是否允许不安全的请求(默认为0)")
 	spFlag  = flag.String("sp", "", "文件保存路径(默认为当前路径)")
-	fFlag   = flag.String("f", "", "包含多个m3u8地址的文件路径(每行一个地址)")
+	fFlag   = flag.String("f", "", "包含多个m3u8地址的 csv(url,filename) 文件路径")
 
 	logger *log.Logger
 	ro     = &grequests.RequestOptions{
@@ -65,6 +66,12 @@ var (
 type TsInfo struct {
 	Name string
 	Url  string
+}
+
+// InputEntry 用于保存 -f 中的 CSV 行
+type InputEntry struct {
+	URL      string
+	Filename string
 }
 
 func init() {
@@ -91,39 +98,72 @@ func Run() {
 	insecure := *sFlag
 	savePath := *spFlag
 
-	var urls []string
+	var entries []InputEntry
 	if filePath != "" {
-		// 从文件读取 URLs
-		content, err := os.ReadFile(filePath)
+		// 从 CSV 文件读取 URL 和 Filename
+		f, err := os.Open(filePath)
 		if err != nil {
 			logger.Fatalf("[Error] 无法读取文件 %s: %v\n", filePath, err)
 			return
 		}
-
-		lines := strings.Split(string(content), "\n")
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if line != "" && !strings.HasPrefix(line, "#") {
-				urls = append(urls, line)
+		defer f.Close()
+		r := csv.NewReader(f)
+		records, err := r.ReadAll()
+		if err != nil {
+			logger.Fatalf("[Error] 无法解析 CSV %s: %v\n", filePath, err)
+			return
+		}
+		for _, rec := range records {
+			if len(rec) < 2 {
+				continue
 			}
+			u := strings.TrimSpace(rec[0])
+			fn := strings.TrimSpace(rec[1])
+			// skip header if present
+			if strings.ToLower(u) == "url" && strings.ToLower(fn) == "filename" {
+				continue
+			}
+			if u == "" {
+				continue
+			}
+			entries = append(entries, InputEntry{URL: u, Filename: fn})
 		}
 	}
-	if m3u8Url != "" {
-		// 单个 URL
-		urls = append(urls, m3u8Url)
+	if m3u8Url != "" && filePath == "" {
+		// 单个 URL (来自 -u)，使用 -o 作为文件名
+		entries = append(entries, InputEntry{URL: m3u8Url, Filename: movieDir})
 	}
 
-	if len(urls) == 0 {
+	if len(entries) == 0 {
 		flag.Usage()
 		return
 	}
 
-	// 循环下载每个 URL
-	for i, url := range urls {
-		if len(urls) > 1 {
-			fmt.Printf("\n========== 开始下载第 %d/%d 个视频 ==========\n", i+1, len(urls))
+	// 循环下载每个条目（支持 m3u8 和 直接文件）
+	for i, entry := range entries {
+		if len(entries) > 1 {
+			fmt.Printf("\n========== 开始下载第 %d/%d 个视频 ==========_\n", i+1, len(entries))
 		}
-		downloadSingleVideo(url, maxGoroutines, hostType, movieDir, cookie, insecure, savePath, i)
+		// 判断是否 m3u8（根据 URL 路径后缀）
+		isM3u8 := false
+		if u, err := url.Parse(entry.URL); err == nil {
+			if strings.HasSuffix(strings.ToLower(u.Path), ".m3u8") {
+				isM3u8 = true
+			}
+		} else if strings.HasSuffix(strings.ToLower(entry.URL), ".m3u8") {
+			isM3u8 = true
+		}
+
+		if isM3u8 {
+			// 确保传入的目录名不带扩展，最终会使用 .mp4
+			nameOnly := strings.TrimSuffix(entry.Filename, filepath.Ext(entry.Filename))
+			downloadSingleVideo(entry.URL, maxGoroutines, hostType, nameOnly, cookie, insecure, savePath, i)
+		} else {
+			// 直接下载（例如 mp4）并保持原后缀（如果 filename 未包含后缀，则补齐 URL 的后缀）
+			if err := downloadDirect(entry.URL, entry.Filename, cookie, insecure, savePath); err != nil {
+				logger.Printf("[Error] 下载文件失败 %s: %v", entry.URL, err)
+			}
+		}
 	}
 }
 
@@ -422,7 +462,7 @@ func execUnixShell(s string) {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("%s", out.String())
+	// fmt.Printf("%s", out.String())
 }
 
 func execWinShell(s string) error {
@@ -433,7 +473,7 @@ func execWinShell(s string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%s", out.String())
+	// fmt.Printf("%s", out.String())
 	return nil
 }
 
@@ -441,7 +481,7 @@ func execWinShell(s string) error {
 func win_merge_file(path string) {
 	originalDir, _ := os.Getwd()
 	defer os.Chdir(originalDir)
-	
+
 	os.Chdir(path)
 	execWinShell("copy /b *.ts merge.tmp")
 	execWinShell("del /Q *.ts")
@@ -452,13 +492,63 @@ func win_merge_file(path string) {
 func unix_merge_file(path string) {
 	originalDir, _ := os.Getwd()
 	defer os.Chdir(originalDir)
-	
+
 	os.Chdir(path)
 	//cmd := `ls  *.ts |sort -t "\." -k 1 -n |awk '{print $0}' |xargs -n 1 -I {} bash -c "cat {} >> new.tmp"`
 	cmd := `cat *.ts >> merge.tmp`
 	execUnixShell(cmd)
 	execUnixShell("rm -rf *.ts")
 	os.Rename("merge.tmp", "merge.mp4")
+}
+
+// downloadDirect 下载非 m3u8 的资源（比如 mp4），并根据提供的 filename 保存
+func downloadDirect(fileUrl, filename, cookie string, insecure int, savePath string) error {
+	// set referer
+	ro.Headers["Referer"], _ = getHost(fileUrl, "apiv2")
+	if insecure != 0 {
+		ro.InsecureSkipVerify = true
+	}
+	if cookie != "" {
+		ro.Headers["Cookie"] = cookie
+	}
+
+	res, err := grequests.Get(fileUrl, ro)
+	if err != nil {
+		return err
+	}
+	if res.StatusCode != 200 {
+		return fmt.Errorf("http status: %d", res.StatusCode)
+	}
+	data := res.Bytes()
+
+	// 尝试从 URL 获取后缀
+	u, _ := url.Parse(fileUrl)
+	ext := filepath.Ext(u.Path)
+	if ext == "" {
+		ct := res.Header.Get("Content-Type")
+		if strings.Contains(ct, "mp4") {
+			ext = ".mp4"
+		}
+	}
+
+	outName := filename
+	if filepath.Ext(outName) == "" && ext != "" {
+		outName = outName + ext
+	}
+
+	pwd, _ := os.Getwd()
+	if savePath != "" {
+		pwd = savePath
+	}
+	if isExist, _ := pathExists(pwd); !isExist {
+		os.MkdirAll(pwd, os.ModePerm)
+	}
+	outPath := filepath.Join(pwd, outName)
+	if err := os.WriteFile(outPath, data, 0666); err != nil {
+		return err
+	}
+	fmt.Printf("[Success] 下载保存路径：%s\n", outPath)
+	return nil
 }
 
 // ============================== 加解密相关 ==============================
