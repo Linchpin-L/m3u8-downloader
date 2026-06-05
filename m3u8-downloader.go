@@ -223,7 +223,7 @@ func downloadSingleVideo(m3u8Url string, maxGoroutines int, hostType string, mov
 	default:
 		unix_merge_file(download_dir)
 	}
-	outputFile := filepath.Join(pwd, dirName+".mp4")
+	outputFile := filepath.Join(pwd, dirName+".ts") // 依旧保留原有的视频格式
 	os.Rename(filepath.Join(download_dir, "merge.mp4"), outputFile)
 	os.RemoveAll(download_dir)
 	DrawProgressBar("Merging", float32(1), PROGRESS_WIDTH, "merge.ts")
@@ -232,6 +232,8 @@ func downloadSingleVideo(m3u8Url string, maxGoroutines int, hostType string, mov
 
 // Download is a simplified, exported wrapper for downloading a single m3u8 URL.
 // It takes only the m3u8 URL and desired filename (without extension).
+//
+//	filename: 文件名，函数会自行携带后缀 .ts
 func Download(m3u8Url, filename string) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
