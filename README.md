@@ -49,6 +49,25 @@ golang 多线程下载直播流m3u8格式的视屏，跨平台。 你只需指�
 完整使用：./m3u8-downloader  -u=http://example.com/index.m3u8 -o=example -n=16 -ht=apiv1 -c="key1=v1; key2=v2"
 ```
 
+### 作为库导入
+
+示例代码：
+
+```go
+package main
+
+import (
+    "log"
+    "github.com/Linchpin-L/m3u8-downloader"
+)
+
+func main() {
+    if err := m3u8downloader.DownloadSingleVideo("https://example.com/index.m3u8", "example"); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
 ### 二进制方式:
 
 Linux 和 MacOS 和 Windows PowerShell

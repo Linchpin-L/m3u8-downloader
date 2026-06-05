@@ -2,7 +2,7 @@
 // @contributor: Junyi<me@junyi.pw>
 // @date:2020-02-18
 // @功能:golang m3u8 video Downloader
-package main
+package m3u8downloader
 
 import (
 	"bytes"
@@ -26,8 +26,6 @@ import (
 
 	"github.com/levigross/grequests"
 )
-
-const debug = false
 
 const (
 	// HEAD_TIMEOUT 请求头超时时间
@@ -79,7 +77,7 @@ func init() {
 }
 
 func main() {
-	Run()
+	// main was moved to a small wrapper in package main to keep this package importable.
 }
 
 func Run() {
@@ -230,6 +228,19 @@ func downloadSingleVideo(m3u8Url string, maxGoroutines int, hostType string, mov
 	os.RemoveAll(download_dir)
 	DrawProgressBar("Merging", float32(1), PROGRESS_WIDTH, "merge.ts")
 	fmt.Printf("\n[Success] 下载保存路径：%s | 共耗时: %6.2fs\n", outputFile, time.Since(now).Seconds())
+}
+
+// Download is a simplified, exported wrapper for downloading a single m3u8 URL.
+// It takes only the m3u8 URL and desired filename (without extension).
+func Download(m3u8Url, filename string) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic: %v", r)
+		}
+	}()
+	// Use defaults: 16 goroutines, empty hostType (auto), empty cookie, insecure=0, savePath="", index=0
+	downloadSingleVideo(m3u8Url, 16, "", filename, "", 0, "", 0)
+	return nil
 }
 
 // 获取m3u8地址的host

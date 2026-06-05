@@ -1,4 +1,4 @@
-module m3u8-downloader
+module github.com/Linchpin-L/m3u8-downloader
 
 go 1.17
 

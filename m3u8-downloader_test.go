@@ -1,4 +1,4 @@
-package main
+package m3u8downloader
 
 import "testing"
 
@@ -20,7 +20,7 @@ func Test_getHost(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := getHost(tt.Url, tt.ht)
-			if err != nil { 
+			if err != nil {
 				t.Errorf("getHost() error = %v", err)
 			}
 			if got != tt.want {
@@ -144,7 +144,7 @@ func TestGetURLDir(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := GetURLDir(tt.input)
-			
+
 			// 检查错误情况
 			if tt.wantErr {
 				if err == nil {
@@ -152,13 +152,13 @@ func TestGetURLDir(t *testing.T) {
 				}
 				return
 			}
-			
+
 			// 检查非错误情况
 			if err != nil {
 				t.Errorf("GetURLDir(%q) 发生意外错误: %v", tt.input, err)
 				return
 			}
-			
+
 			// 检查结果
 			if result != tt.expected {
 				t.Errorf("GetURLDir(%q) = %q, 期望 %q", tt.input, result, tt.expected)
@@ -216,19 +216,19 @@ func TestGetURLDirEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := GetURLDir(tt.input)
-			
+
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("GetURLDir(%q) 期望错误但没有发生", tt.input)
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Errorf("GetURLDir(%q) 发生意外错误: %v", tt.input, err)
 				return
 			}
-			
+
 			if result != tt.expected {
 				t.Errorf("GetURLDir(%q) = %q, 期望 %q", tt.input, result, tt.expected)
 			}
