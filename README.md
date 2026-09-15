@@ -118,6 +118,11 @@ Linux 和 MacOS 和 Windows PowerShell
 未指定下载地址源，请输入 m3u8 视频地址(http(s):// 开头，直接回车退出): https://example.com/index.m3u8
 ```
 
+## TODO
+
+- [ ] 合并结果兼容性问题：当前使用 `copy /b`（Windows）或 `cat`（Unix）对 TS 分片做纯字节拼接，不重写分片内的 PTS/DTS 时间戳。分片各自携带独立时间轴，拼接后时间戳不连续——PotPlayer、VLC 等兼容性强的播放器可正常播放，但 Windows 自带"电影和电视"等基于 Media Foundation 的播放器通常只能播放开头几秒。计划改用 ffmpeg remux（`ffmpeg -i merge.ts -c copy out.mp4`）或自行重写时间轴解决。
+- [ ] 分片静默缺失：单个 TS 分片重试多次仍失败时会被跳过，合并不报错，最终文件中间会缺一段。计划增加缺失分片检测，合并前给出警告。
+
 ## 问题说明
 
 1.在Linux或者mac平台，如果显示无运行权限，请用chmod 命令进行添加权限
