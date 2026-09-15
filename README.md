@@ -8,6 +8,8 @@ golang 多线程下载直播流m3u8格式的视屏，跨平台。 你只需指�
 1. 下载和解析 M3U8
 2. 下载 TS 失败重试 （加密的同步解密)
 3. 合并 TS 片段
+4. 批量下载（CSV 文件指定多个地址）
+5. 独立运行 exe 时，若无任何地址源，会交互式提示输入 m3u8 地址，便于普通用户使用
 
 > 可以下载岛国小电影  
 > 可以下载岛国小电影  
@@ -17,10 +19,24 @@ golang 多线程下载直播流m3u8格式的视屏，跨平台。 你只需指�
 ## 效果展示
 ![demo](./demo.gif)
 
+## 项目结构
+
+```
+.
+├── m3u8-downloader.go       # 核心下载库（包功能，供导入调用，不含 CLI 逻辑）
+├── cmd/m3u8-downloader/
+│   └── main.go              # 命令行入口（仅独立 exe 使用）
+├── build-release.sh         # 多平台打包脚本
+└── m3u8-downloader_test.go  # 测试
+```
+
+包功能与 exe 功能各自独立：给包调用方修改功能不影响 exe 行为，修改 CLI 也不必动库。
+
 ## 参数说明：
 
 ```
 - u M3U8 地址
+- f 包含多个m3u8地址的 csv(url,filename) 文件路径
 - o 自定义文件名, 默认 movie
 - n 下载协程并发数，默认 16
 - ht 设置getHost的方式（共两种 apiv1 和 apiv2）, 默认 apiv1
@@ -30,6 +46,8 @@ golang 多线程下载直播流m3u8格式的视屏，跨平台。 你只需指�
 ```
 
 默认情况只需要传`u`参数,其他参数保持默认即可。 部分链接可能限制请求频率，可根据实际情况调整 `n` 参数的值。
+
+不带任何参数直接运行 exe（双击运行）时，会提示输入 m3u8 地址，回车即可开始下载；直接回车则退出。
 
 ## 下载
 
@@ -44,8 +62,9 @@ golang 多线程下载直播流m3u8格式的视屏，跨平台。 你只需指�
 ### 源码方式
 
 ```bash
-自己编译：go build -o m3u8-downloader
+自己编译：go build -o m3u8-downloader ./cmd/m3u8-downloader
 简洁使用：./m3u8-downloader  -u=http://example.com/index.m3u8
+批量使用：./m3u8-downloader  -f=videos.csv
 完整使用：./m3u8-downloader  -u=http://example.com/index.m3u8 -o=example -n=16 -ht=apiv1 -c="key1=v1; key2=v2"
 ```
 
@@ -58,13 +77,21 @@ package main
 
 import (
     "log"
-    "github.com/Linchpin-L/m3u8-downloader"
+
+    m3u8downloader "github.com/Linchpin-L/m3u8-downloader"
 )
 
 func main() {
-    if err := m3u8downloader.DownloadSingleVideo("https://example.com/index.m3u8", "example"); err != nil {
+    // 简洁方式：使用默认参数（16 线程等），文件名会自动携带 .ts 后缀
+    if err := m3u8downloader.Download("https://example.com/index.m3u8", "example"); err != nil {
         log.Fatal(err)
     }
+
+    // 完整方式：自定义线程数、host 方式、cookie、保存路径等
+    m3u8downloader.DownloadSingleVideo("https://example.com/index.m3u8", 16, "", "example", "", 0, "", 0)
+
+    // 直接下载非 m3u8 资源（例如 mp4）
+    m3u8downloader.DownloadDirect("https://example.com/video.mp4", "video", "", 0, "")
 }
 ```
 
@@ -78,10 +105,17 @@ Linux 和 MacOS 和 Windows PowerShell
 ./m3u8-downloader-v1.0.0-darwin-amd64 -u=http://example.com/index.m3u8 
 .\m3u8-downloader-v1.0.0-windows-amd64.exe -u=http://example.com/index.m3u8
 
+批量使用：
+./m3u8-downloader-v1.0.0-linux-amd64 -f=videos.csv
+
 完整使用：
 ./m3u8-downloader-v1.0.0-linux-amd64 -u=http://example.com/index.m3u8 -o=example -n=16 -ht=apiv1 -c="key1=v1; key2=v2"
 ./m3u8-downloader-v1.0.0-darwin-amd64 -u=http://example.com/index.m3u8 -o=example -n=16 -ht=apiv1 -c="key1=v1; key2=v2"
 .\m3u8-downloader-v1.0.0-windows-amd64.exe -u=http://example.com/index.m3u8 -o=example -n=16 -ht=apiv1 -c="key1=v1; key2=v2"
+
+交互使用（不带任何参数运行）：
+.\m3u8-downloader-v1.0.0-windows-amd64.exe
+未指定下载地址源，请输入 m3u8 视频地址(http(s):// 开头，直接回车退出): https://example.com/index.m3u8
 ```
 
 ## 问题说明

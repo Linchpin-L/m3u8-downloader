@@ -8,10 +8,7 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
-	"encoding/csv"
-	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net/url"
 	"os"
@@ -37,16 +34,6 @@ const (
 )
 
 var (
-	// 命令行参数
-	urlFlag = flag.String("u", "", "m3u8下载地址(http(s)://url/xx/xx/index.m3u8)")
-	nFlag   = flag.Int("n", 16, "下载线程数(max goroutines num)")
-	htFlag  = flag.String("ht", "", "设置getHost的方式(apiv1: `http(s):// + url.Host + filepath.Dir(url.Path)`; apiv2: `http(s)://+ u.Host`")
-	oFlag   = flag.String("o", "movie", "自定义文件名(默认为movie)")
-	cFlag   = flag.String("c", "", "自定义请求 cookie")
-	sFlag   = flag.Int("s", 0, "是否允许不安全的请求(默认为0)")
-	spFlag  = flag.String("sp", "", "文件保存路径(默认为当前路径)")
-	fFlag   = flag.String("f", "", "包含多个m3u8地址的 csv(url,filename) 文件路径")
-
 	logger *log.Logger
 	ro     = &grequests.RequestOptions{
 		UserAgent:      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.88 Safari/537.36",
@@ -66,107 +53,12 @@ type TsInfo struct {
 	Url  string
 }
 
-// InputEntry 用于保存 -f 中的 CSV 行
-type InputEntry struct {
-	URL      string
-	Filename string
-}
-
 func init() {
 	logger = log.New(os.Stdout, "", log.Ldate|log.Ltime|log.Lshortfile)
 }
 
-func main() {
-	// main was moved to a small wrapper in package main to keep this package importable.
-}
-
-func Run() {
-	msgTpl := "[功能]:多线程下载直播流 m3u8 视频（ts + 合并）\n[提醒]:如果下载失败，请使用 -ht=apiv2 \n[提醒]:如果下载失败，m3u8 地址可能存在嵌套\n[提醒]:如果进度条中途下载失败，可重复执行"
-	fmt.Println(msgTpl)
-	runtime.GOMAXPROCS(runtime.NumCPU())
-
-	// 解析命令行参数
-	flag.Parse()
-	m3u8Url := *urlFlag
-	filePath := *fFlag
-	maxGoroutines := *nFlag
-	hostType := *htFlag
-	movieDir := *oFlag
-	cookie := *cFlag
-	insecure := *sFlag
-	savePath := *spFlag
-
-	var entries []InputEntry
-	if filePath != "" {
-		// 从 CSV 文件读取 URL 和 Filename
-		f, err := os.Open(filePath)
-		if err != nil {
-			logger.Fatalf("[Error] 无法读取文件 %s: %v\n", filePath, err)
-			return
-		}
-		defer f.Close()
-		r := csv.NewReader(f)
-		records, err := r.ReadAll()
-		if err != nil {
-			logger.Fatalf("[Error] 无法解析 CSV %s: %v\n", filePath, err)
-			return
-		}
-		for _, rec := range records {
-			if len(rec) < 2 {
-				continue
-			}
-			u := strings.TrimSpace(rec[0])
-			fn := strings.TrimSpace(rec[1])
-			// skip header if present
-			if strings.ToLower(u) == "url" && strings.ToLower(fn) == "filename" {
-				continue
-			}
-			if u == "" {
-				continue
-			}
-			entries = append(entries, InputEntry{URL: u, Filename: fn})
-		}
-	}
-	if m3u8Url != "" && filePath == "" {
-		// 单个 URL (来自 -u)，使用 -o 作为文件名
-		entries = append(entries, InputEntry{URL: m3u8Url, Filename: movieDir})
-	}
-
-	if len(entries) == 0 {
-		flag.Usage()
-		return
-	}
-
-	// 循环下载每个条目（支持 m3u8 和 直接文件）
-	for i, entry := range entries {
-		if len(entries) > 1 {
-			fmt.Printf("\n========== 开始下载第 %d/%d 个视频 ==========_\n", i+1, len(entries))
-		}
-		// 判断是否 m3u8（根据 URL 路径后缀）
-		isM3u8 := false
-		if u, err := url.Parse(entry.URL); err == nil {
-			if strings.HasSuffix(strings.ToLower(u.Path), ".m3u8") {
-				isM3u8 = true
-			}
-		} else if strings.HasSuffix(strings.ToLower(entry.URL), ".m3u8") {
-			isM3u8 = true
-		}
-
-		if isM3u8 {
-			// 确保传入的目录名不带扩展，最终会使用 .mp4
-			nameOnly := strings.TrimSuffix(entry.Filename, filepath.Ext(entry.Filename))
-			downloadSingleVideo(entry.URL, maxGoroutines, hostType, nameOnly, cookie, insecure, savePath, i)
-		} else {
-			// 直接下载（例如 mp4）并保持原后缀（如果 filename 未包含后缀，则补齐 URL 的后缀）
-			if err := downloadDirect(entry.URL, entry.Filename, cookie, insecure, savePath); err != nil {
-				logger.Printf("[Error] 下载文件失败 %s: %v", entry.URL, err)
-			}
-		}
-	}
-}
-
-// downloadSingleVideo 下载单个视频
-func downloadSingleVideo(m3u8Url string, maxGoroutines int, hostType string, movieDir string, cookie string, insecure int, savePath string, index int) {
+// DownloadSingleVideo 下载单个视频（供 CLI 与包调用方使用）
+func DownloadSingleVideo(m3u8Url string, maxGoroutines int, hostType string, movieDir string, cookie string, insecure int, savePath string, index int) {
 	now := time.Now()
 
 	ro.Headers["Referer"], _ = getHost(m3u8Url, "apiv2")
@@ -241,7 +133,7 @@ func Download(m3u8Url, filename string) (err error) {
 		}
 	}()
 	// Use defaults: 16 goroutines, empty hostType (auto), empty cookie, insecure=0, savePath="", index=0
-	downloadSingleVideo(m3u8Url, 16, "", filename, "", 0, "", 0)
+	DownloadSingleVideo(m3u8Url, 16, "", filename, "", 0, "", 0)
 	return nil
 }
 
@@ -348,11 +240,6 @@ func getTsList(host, body string) (tsList []TsInfo) {
 		}
 	}
 	return
-}
-
-func getFromFile() string {
-	data, _ := ioutil.ReadFile("./ts.txt")
-	return string(data)
 }
 
 // 下载ts文件
@@ -514,8 +401,8 @@ func unix_merge_file(path string) {
 	os.Rename("merge.tmp", "merge.mp4")
 }
 
-// downloadDirect 下载非 m3u8 的资源（比如 mp4），并根据提供的 filename 保存
-func downloadDirect(fileUrl, filename, cookie string, insecure int, savePath string) error {
+// DownloadDirect 下载非 m3u8 的资源（比如 mp4），并根据提供的 filename 保存
+func DownloadDirect(fileUrl, filename, cookie string, insecure int, savePath string) error {
 	// set referer
 	ro.Headers["Referer"], _ = getHost(fileUrl, "apiv2")
 	if insecure != 0 {
