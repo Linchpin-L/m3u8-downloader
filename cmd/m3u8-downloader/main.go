@@ -119,7 +119,7 @@ func Run() {
 		if isM3u8 {
 			// 确保传入的目录名不带扩展，最终会使用 .mp4
 			nameOnly := strings.TrimSuffix(entry.Filename, filepath.Ext(entry.Filename))
-			m3u8downloader.DownloadSingleVideo(entry.URL, maxGoroutines, hostType, nameOnly, cookie, insecure, savePath, i)
+			m3u8downloader.DownloadSingleVideo(entry.URL, maxGoroutines, hostType, nameOnly, cookie, insecure, savePath, i, true)
 		} else {
 			// 直接下载（例如 mp4）并保持原后缀（如果 filename 未包含后缀，则补齐 URL 的后缀）
 			if err := m3u8downloader.DownloadDirect(entry.URL, entry.Filename, cookie, insecure, savePath); err != nil {

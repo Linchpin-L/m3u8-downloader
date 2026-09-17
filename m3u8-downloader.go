@@ -58,7 +58,8 @@ func init() {
 }
 
 // DownloadSingleVideo 下载单个视频（供 CLI 与包调用方使用）
-func DownloadSingleVideo(m3u8Url string, maxGoroutines int, hostType string, movieDir string, cookie string, insecure int, savePath string, index int) {
+// merge: 是否将 ts 分片合并为单个文件；为 false 时保留分片，movieDir 作为文件夹名
+func DownloadSingleVideo(m3u8Url string, maxGoroutines int, hostType string, movieDir string, cookie string, insecure int, savePath string, index int, merge bool) {
 	now := time.Now()
 
 	ro.Headers["Referer"], _ = getHost(m3u8Url, "apiv2")
@@ -109,31 +110,42 @@ func DownloadSingleVideo(m3u8Url string, maxGoroutines int, hostType string, mov
 		fmt.Printf("\n[Failed] 请检查url地址有效性 \n")
 		return
 	}
+	if !merge {
+		m3u8Name := "index.m3u8"
+		if u, err := url.Parse(m3u8Url); err == nil {
+			if base := path.Base(u.Path); base != "" && base != "." && base != "/" {
+				m3u8Name = base
+			}
+		}
+		os.WriteFile(filepath.Join(download_dir, m3u8Name), []byte(m3u8Body), 0666)
+		fmt.Printf("\n[Success] 下载保存路径：%s | 共耗时: %6.2fs\n", download_dir, time.Since(now).Seconds())
+		return
+	}
+	outputFile := filepath.Join(pwd, dirName+".ts")
 	switch runtime.GOOS {
 	case "windows":
-		win_merge_file(download_dir)
+		win_merge_file(download_dir, outputFile)
 	default:
-		unix_merge_file(download_dir)
+		unix_merge_file(download_dir, outputFile)
 	}
-	outputFile := filepath.Join(pwd, dirName+".ts") // 依旧保留原有的视频格式
-	os.Rename(filepath.Join(download_dir, "merge.mp4"), outputFile)
 	os.RemoveAll(download_dir)
 	DrawProgressBar("Merging", float32(1), PROGRESS_WIDTH, "merge.ts")
 	fmt.Printf("\n[Success] 下载保存路径：%s | 共耗时: %6.2fs\n", outputFile, time.Since(now).Seconds())
 }
 
 // Download is a simplified, exported wrapper for downloading a single m3u8 URL.
-// It takes only the m3u8 URL and desired filename (without extension).
+// It takes only the m3u8 URL and desired filename.
 //
-//	filename: 文件名，函数会自行携带后缀 .ts
-func Download(m3u8Url, filename string) (err error) {
+//	filename: merge 为 true 时是文件名（函数会自行携带后缀 .ts），为 false 时是文件夹名，ts 分片保留在该文件夹内
+//	merge:    是否合并 ts 分片；不合并可保持视频最原始的分片形态
+func Download(m3u8Url, filename string, merge bool) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic: %v", r)
 		}
 	}()
 	// Use defaults: 16 goroutines, empty hostType (auto), empty cookie, insecure=0, savePath="", index=0
-	DownloadSingleVideo(m3u8Url, 16, "", filename, "", 0, "", 0)
+	DownloadSingleVideo(m3u8Url, 16, "", filename, "", 0, "", 0, merge)
 	return nil
 }
 
@@ -378,18 +390,18 @@ func execWinShell(s string) error {
 }
 
 // windows 合并文件
-func win_merge_file(path string) {
+func win_merge_file(path string, outputFile string) {
 	originalDir, _ := os.Getwd()
 	defer os.Chdir(originalDir)
 
 	os.Chdir(path)
 	execWinShell("copy /b *.ts merge.tmp")
 	execWinShell("del /Q *.ts")
-	os.Rename("merge.tmp", "merge.mp4")
+	os.Rename("merge.tmp", outputFile)
 }
 
 // unix 合并文件
-func unix_merge_file(path string) {
+func unix_merge_file(path string, outputFile string) {
 	originalDir, _ := os.Getwd()
 	defer os.Chdir(originalDir)
 
@@ -398,7 +410,7 @@ func unix_merge_file(path string) {
 	cmd := `cat *.ts >> merge.tmp`
 	execUnixShell(cmd)
 	execUnixShell("rm -rf *.ts")
-	os.Rename("merge.tmp", "merge.mp4")
+	os.Rename("merge.tmp", outputFile)
 }
 
 // DownloadDirect 下载非 m3u8 的资源（比如 mp4），并根据提供的 filename 保存

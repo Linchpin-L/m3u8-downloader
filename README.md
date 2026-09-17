@@ -82,13 +82,18 @@ import (
 )
 
 func main() {
-    // 简洁方式：使用默认参数（16 线程等），文件名会自动携带 .ts 后缀
-    if err := m3u8downloader.Download("https://example.com/index.m3u8", "example"); err != nil {
+    // 简洁方式：使用默认参数（16 线程等），merge 为 true 时文件名会自动携带 .ts 后缀
+    if err := m3u8downloader.Download("https://example.com/index.m3u8", "example", true); err != nil {
         log.Fatal(err)
     }
 
-    // 完整方式：自定义线程数、host 方式、cookie、保存路径等
-    m3u8downloader.DownloadSingleVideo("https://example.com/index.m3u8", 16, "", "example", "", 0, "", 0)
+    // 不合并分片：filename 作为文件夹名，ts 分片保留在该文件夹内
+    if err := m3u8downloader.Download("https://example.com/index.m3u8", "example", false); err != nil {
+        log.Fatal(err)
+    }
+
+    // 完整方式：自定义线程数、host 方式、cookie、保存路径等（最后一个参数为是否合并）
+    m3u8downloader.DownloadSingleVideo("https://example.com/index.m3u8", 16, "", "example", "", 0, "", 0, true)
 
     // 直接下载非 m3u8 资源（例如 mp4）
     m3u8downloader.DownloadDirect("https://example.com/video.mp4", "video", "", 0, "")
